@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Elagoht/collage-snippets-highlighter/main/schemas/collage-plugin-manifest.schema.json",
+  "name": "elagoht/accesslog",
+  "description": "A collage plugin that writes one log line per request.",
+  "repository": "https://github.com/Elagoht/collage-accesslog",
+  "config": {
+    "type": "object",
+    "description": "A collage plugin that writes one log line per request.",
+    "properties": {
+      "requestIdHeader": {
+        "type": "string",
+        "description": "RequestIDHeader is the header a request id is read from and sent back in. Default \"X-Request-ID\"."
+      },
+      "sample": {
+        "type": "number",
+        "description": "Sample is the fraction of successful (2xx) responses logged, between 0 and 1: 0.1 logs one in ten. Zero, the default, logs every one. A redirect, a client error and a server error are always logged: they are the lines someone goes looking for."
+      },
+      "skip": {
+        "type": "array",
+        "description": "Skip are path prefixes never logged. Default [\"/_collage/\", \"/healthz\"]: collage's development endpoints, and the health check a load balancer polls every few seconds. An empty list in configuration logs everything.",
+        "items": {
+          "type": "string"
+        }
+      },
+      "trustProxy": {
+        "type": "boolean",
+        "description": "TrustProxy reads the client's address from X-Forwarded-For, or X-Real-IP, when the request came from a trusted proxy. Without it those headers are ignored, since anybody can send them."
+      },
+      "trustedProxies": {
+        "type": "array",
+        "description": "TrustedProxies are the addresses and CIDR ranges of the proxies in front of the site. Empty trusts loopback and private addresses, which is what a reverse proxy on the same host or network has.",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
