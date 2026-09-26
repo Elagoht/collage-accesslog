@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.23.0 or later.
+Requires collage v0.24.0 or later.
 
 ## The line
 
@@ -106,5 +106,15 @@ starting.
   not in `duration`.
 - collage's development reload stream is served ahead of all middleware and is
   never logged, whatever `Skip` says.
+- collage redirects a path with dot segments or doubled slashes to its clean
+  spelling ahead of all middleware, so that redirect is not logged; the request
+  for the clean path that follows is.
 - Sampling to none is not offered: `Sample` is zero by default and zero means all.
   A site that wants no successful requests logged wants `Skip`, or no access log.
+
+## Changes
+
+### v0.1.1
+
+- README: a path collage v0.24.0 redirects to its clean spelling is redirected before middleware, so the redirect is not logged.
+- Requires collage v0.24.0.

@@ -224,6 +224,22 @@ func TestSkip(t *testing.T) {
 	}
 }
 
+// collage redirects a path with dot segments ahead of all middleware, so the
+// redirect is not logged, and /_collage/../ cannot pass as a skipped path.
+func TestUncleanPathIsRedirectedFirst(t *testing.T) {
+	h, logs := site(t, setup{})
+	if rec := get(h, "/_collage/../"); rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/" {
+		t.Fatalf("/_collage/../ = %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if l := logs.lines(t); len(l) != 0 {
+		t.Errorf("the redirect was logged: %v", l)
+	}
+	get(h, "/")
+	if l := logs.lines(t); len(l) != 1 || l[0]["path"] != "/" {
+		t.Errorf("the clean request: %v", l)
+	}
+}
+
 // Sampling drops successful responses, never errors.
 func TestSample(t *testing.T) {
 	h, logs := site(t, setup{opts: accesslog.Options{Sample: 1e-9}})
