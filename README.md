@@ -100,10 +100,12 @@ starting.
 
 ## Limitations
 
-- The plugin's middleware runs after the application's own, so a request an
-  application middleware answers itself — a `401` from an auth check — never
-  reaches it and is not logged, and the time the application's middleware spent is
-  not in `duration`.
+- Where the plugin's middleware runs depends on collage's version. From collage
+  v0.38.0 it runs where the plugin was registered: in `Config.Plugins` it is outside
+  every `app.Use` middleware, so a request the application's middleware answers
+  itself — a `401` from an auth check — is logged, and the time that middleware
+  spent is in `duration`. Before v0.38.0 it ran inside the application's
+  middleware, and such a request was neither logged nor timed.
 - collage's development reload stream is served ahead of all middleware and is
   never logged, whatever `Skip` says.
 - collage redirects a path with dot segments or doubled slashes to its clean
@@ -113,6 +115,11 @@ starting.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### v0.1.4
+
+- README: from collage v0.38.0 the plugin's middleware is outside the application's
+  own, so a request an application middleware answers is logged.
 
 ### v0.1.2
 
