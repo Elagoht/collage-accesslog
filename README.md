@@ -38,7 +38,7 @@ cannot put a newline or a megabyte into the log.
 The id is sent back on the response, and is in the request's context:
 
 ```go
-func checkout(ctx context.Context, rc *collage.RenderContext) (any, []string, error) {
+func checkout(ctx context.Context, rc *collage.RenderContext) (Order, []string, error) {
 	logger.InfoContext(ctx, "charging card", "request_id", accesslog.RequestID(ctx))
 	// ...
 }
@@ -115,6 +115,13 @@ starting.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### v0.1.5
+
+- Requires collage v0.49.0. Tests only: the test site gives its fragments
+  typed data with `collage.Load` and `collage.DataHandler`, since
+  `WithDataHandler` is gone. The plugin itself is unchanged.
+- README: the request-id sample handler returns a real type, not `any`.
 
 ### v0.1.4
 

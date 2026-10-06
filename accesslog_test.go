@@ -86,14 +86,14 @@ func site(t *testing.T, s setup) (http.Handler, *logBuffer) {
 	}
 	for _, page := range []*collage.Page{
 		collage.NewPage("home").WithContent(collage.NewFragment("home", "ok.html").Build()).WithPath("en", "/").Build(),
-		collage.NewPage("id").WithContent(collage.NewFragment("id", "p.html").WithDataHandler(
-			func(_ context.Context, rc *collage.RenderContext) (any, []string, error) { // any: DataHandlerFunc's own signature
-				return template.HTML(accesslog.RequestID(rc.Context())), nil, nil
-			}).Build()).WithPath("en", "/id").Build(),
-		collage.NewPage("broken").WithContent(collage.NewFragment("broken", "ok.html").Required().WithDataHandler(
-			func(context.Context, *collage.RenderContext) (any, []string, error) { // any: DataHandlerFunc's own signature
-				return nil, nil, errors.New("down")
-			}).Build()).WithPath("en", "/broken").Build(),
+		collage.NewPage("id").WithContent(collage.NewFragment("id", "p.html").WithData(collage.Load(
+			func(_ context.Context, rc *collage.RenderContext) (template.HTML, error) {
+				return template.HTML(accesslog.RequestID(rc.Context())), nil
+			})).Build()).WithPath("en", "/id").Build(),
+		collage.NewPage("broken").WithContent(collage.NewFragment("broken", "ok.html").Required().WithData(collage.Load(
+			func(context.Context, *collage.RenderContext) (string, error) {
+				return "", errors.New("down")
+			})).Build()).WithPath("en", "/broken").Build(),
 		collage.NewPage("health").WithContent(collage.NewFragment("health", "ok.html").Build()).WithPath("en", "/healthz").Build(),
 	} {
 		if err := app.RegisterPage(page); err != nil {
