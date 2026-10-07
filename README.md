@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.52.0 or later.
+Requires collage v0.53.0 or later.
 
 ## The line
 
@@ -125,7 +125,7 @@ starting.
 
 ### v0.1.10
 
-- `/readyz` is skipped by default, beside `/healthz`: they are the paths of `elagoht/health`. The README says where to list accesslog relative to health. Nothing else changes.
+- Requires collage v0.53.0, the release `elagoht/health` needs. `/readyz` is skipped by default, beside `/healthz`: they are the paths of `elagoht/health`. The README says where to list accesslog relative to health. Nothing else changes.
 
 ### v0.1.9
 
