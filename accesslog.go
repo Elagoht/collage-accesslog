@@ -76,7 +76,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.5" }
+func (p *Plugin) Version() string                { return "0.1.6" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var _ collage.Plugin = (*Plugin)(nil)
@@ -88,9 +88,11 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	if p.opts.Skip == nil {
 		p.opts.Skip = []string{"/_collage/", "/healthz"}
 	}
-	if err := host.Config(&p.opts); err != nil {
+	cfg, err := collage.PluginConfig(host, p.opts)
+	if err != nil {
 		return err
 	}
+	p.opts = cfg
 	o := &p.opts
 	if o.Sample < 0 || o.Sample > 1 {
 		return fmt.Errorf("accesslog: sample %v must be between 0 and 1", o.Sample)

@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.24.0 or later.
+Requires collage v0.50.0 or later.
 
 ## The line
 
@@ -116,7 +116,11 @@ starting.
 
 ## Changes
 
-### v0.1.5
+### v0.1.6
+
+- Requires collage v0.50.0. Plugin configuration is read with `collage.PluginConfig`, since `host.Config` is gone. Nothing else changes.
+
+### v0.1.6
 
 - Requires collage v0.49.0. Tests only: the test site gives its fragments
   typed data with `collage.Load` and `collage.DataHandler`, since

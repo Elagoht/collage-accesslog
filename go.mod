@@ -5,4 +5,4 @@ module github.com/Elagoht/collage-accesslog
 
 go 1.26
 
-require github.com/Elagoht/collage v0.49.0
+require github.com/Elagoht/collage v0.50.0
