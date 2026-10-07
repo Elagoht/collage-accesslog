@@ -76,7 +76,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.8" }
+func (p *Plugin) Version() string                { return "0.1.9" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var _ collage.Plugin = (*Plugin)(nil)
@@ -153,6 +153,13 @@ func newID() string {
 
 func (p *Plugin) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A static build asking for its own files to capture their headers is
+		// not a request anyone served: it is not logged, and gets no request
+		// id, which differs on every request and is no header of the file.
+		if collage.IsCapture(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		id := r.Header.Get(p.opts.RequestIDHeader)
 		if !validID.MatchString(id) {
 			id = newID()

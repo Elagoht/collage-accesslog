@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.50.0 or later.
+Requires collage v0.52.0 or later.
 
 ## The line
 
@@ -115,6 +115,10 @@ starting.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### v0.1.9
+
+- Requires collage v0.52.0. A static build's header capture (`collage.IsCapture`) is not logged and gets no request id: `collage build` no longer writes a line for every file it asks for, nor reports `X-Request-ID` as an unstable header.
 
 ### v0.1.8
 
