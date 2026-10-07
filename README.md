@@ -116,6 +116,10 @@ starting.
 
 ## Changes
 
+### v0.1.8
+
+- Retracts v0.1.6, tagged by mistake on the previous release's code. Use v0.1.7 or later. Nothing else changes.
+
 ### v0.1.7
 
 - Requires collage v0.50.0. Plugin configuration is read with `collage.PluginConfig`, since `host.Config` is gone. Nothing else changes.
