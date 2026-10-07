@@ -95,6 +95,7 @@ func site(t *testing.T, s setup) (http.Handler, *logBuffer) {
 				return "", errors.New("down")
 			})).Build()).WithPath("en", "/broken").Build(),
 		collage.NewPage("health").WithContent(collage.NewFragment("health", "ok.html").Build()).WithPath("en", "/healthz").Build(),
+		collage.NewPage("ready").WithContent(collage.NewFragment("ready", "ok.html").Build()).WithPath("en", "/readyz").Build(),
 	} {
 		if err := app.RegisterPage(page); err != nil {
 			t.Fatal(err)
@@ -208,6 +209,7 @@ func TestRequestID(t *testing.T) {
 func TestSkip(t *testing.T) {
 	h, logs := site(t, setup{})
 	get(h, "/healthz")
+	get(h, "/readyz")
 	get(h, "/_collage/anything")
 	if l := logs.lines(t); len(l) != 0 {
 		t.Errorf("skipped paths logged: %v", l)

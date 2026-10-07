@@ -17,7 +17,7 @@
       },
       "skip": {
         "type": "array",
-        "description": "Skip are path prefixes never logged. Default [\"/_collage/\", \"/healthz\"]: collage's development endpoints, and the health check a load balancer polls every few seconds. An empty list in configuration logs everything.",
+        "description": "Skip are path prefixes never logged. Default [\"/_collage/\", \"/healthz\", \"/readyz\"]: collage's development endpoints, and the liveness and readiness checks a load balancer or kubelet polls every few seconds. An empty list in configuration logs everything.",
         "items": {
           "type": "string"
         }

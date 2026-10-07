@@ -42,9 +42,9 @@ type Options struct {
 	// Logger receives the lines. Unset, it is the application's logger. It can
 	// only be set from Go.
 	Logger *slog.Logger `json:"-"`
-	// Skip are path prefixes never logged. Default ["/_collage/", "/healthz"]:
-	// collage's development endpoints, and the health check a load balancer
-	// polls every few seconds. An empty list in configuration logs everything.
+	// Skip are path prefixes never logged. Default ["/_collage/", "/healthz", "/readyz"]:
+	// collage's development endpoints, and the liveness and readiness checks a
+	// load balancer or kubelet polls every few seconds (elagoht/health's paths). An empty list in configuration logs everything.
 	Skip []string `json:"skip"`
 	// Sample is the fraction of successful (2xx) responses logged, between 0 and
 	// 1: 0.1 logs one in ten. Zero, the default, logs every one. A redirect, a
@@ -76,7 +76,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.9" }
+func (p *Plugin) Version() string                { return "0.1.10" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var _ collage.Plugin = (*Plugin)(nil)
@@ -86,7 +86,7 @@ var headerName = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 // Init reads the configuration and wraps every request.
 func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	if p.opts.Skip == nil {
-		p.opts.Skip = []string{"/_collage/", "/healthz"}
+		p.opts.Skip = []string{"/_collage/", "/healthz", "/readyz"}
 	}
 	cfg, err := collage.PluginConfig(host, p.opts)
 	if err != nil {

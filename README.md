@@ -53,7 +53,9 @@ would show every reader the first reader's id.
 ## Skipping and sampling
 
 `Skip` lists path prefixes that are never logged, `/_collage/` — collage's
-development endpoints — and `/healthz` by default. A skipped request still gets an
+development endpoints — and `/healthz` and `/readyz`, the probe paths of
+`elagoht/health`, by default. A different `livePath` or `readyPath` there must be
+added to `skip`. A skipped request still gets an
 id. An empty list logs everything.
 
 A busy site can log a fraction of its successful responses: `Sample: 0.1` logs one
@@ -84,7 +86,7 @@ its duration is how long the connection was open.
 ```json
 {
   "elagoht/accesslog": {
-    "skip": ["/_collage/", "/healthz", "/static/"],
+    "skip": ["/_collage/", "/healthz", "/readyz", "/static/"],
     "sample": 0.25,
     "trustProxy": true,
     "trustedProxies": ["10.0.0.0/8"],
@@ -106,6 +108,11 @@ starting.
   itself — a `401` from an auth check — is logged, and the time that middleware
   spent is in `duration`. Before v0.38.0 it ran inside the application's
   middleware, and such a request was neither logged nor timed.
+- With `elagoht/health`, the order decides what is logged. Middleware is registered
+  where it is listed, so with accesslog listed after health, a probe and a request
+  health sheds with `503 overloaded` never reach it and are not logged. List
+  accesslog before health to log shed requests; the probes then reach it too,
+  which the default `skip` of `/healthz` and `/readyz` keeps out of the log.
 - collage's development reload stream is served ahead of all middleware and is
   never logged, whatever `Skip` says.
 - collage redirects a path with dot segments or doubled slashes to its clean
@@ -115,6 +122,10 @@ starting.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### v0.1.10
+
+- `/readyz` is skipped by default, beside `/healthz`: they are the paths of `elagoht/health`. The README says where to list accesslog relative to health. Nothing else changes.
 
 ### v0.1.9
 
