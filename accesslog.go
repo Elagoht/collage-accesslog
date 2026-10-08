@@ -5,7 +5,8 @@
 //	})
 //
 // A line carries the method, path, status, bytes written, duration, client
-// address, user agent, referer and request id, as slog attributes: text or JSON is
+// address, user agent, referer (its scheme, host and path, unless
+// Options.FullReferer) and request id, as slog attributes: text or JSON is
 // the logger's handler's choice, not the plugin's. The logger is the application's
 // own unless Options.Logger names another.
 //
@@ -27,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -62,6 +64,11 @@ type Options struct {
 	// RequestIDHeader is the header a request id is read from and sent back in.
 	// Default "X-Request-ID".
 	RequestIDHeader string `json:"requestIdHeader"`
+	// FullReferer logs the Referer header exactly as it came. Without it a
+	// referer is logged as its scheme, host and path only — no query, fragment
+	// or user info, where a reset token or a session id travels — and one that
+	// does not parse as a URL is logged empty.
+	FullReferer bool `json:"fullReferer"`
 }
 
 // Plugin writes the lines.
@@ -76,7 +83,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.10" }
+func (p *Plugin) Version() string                { return "0.1.11" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var _ collage.Plugin = (*Plugin)(nil)
@@ -213,9 +220,38 @@ func (p *Plugin) write(r *http.Request, rec *recorder, id string, d time.Duratio
 		slog.Duration("duration", d),
 		slog.String("ip", p.clientIP(r)),
 		slog.String("user_agent", r.UserAgent()),
-		slog.String("referer", r.Referer()),
+		slog.String("referer", p.referer(r)),
 		slog.String("request_id", id),
 	)
+}
+
+// referer returns r's Referer header as it is logged: whole with FullReferer,
+// otherwise trimmed by trimReferer.
+func (p *Plugin) referer(r *http.Request) string {
+	if p.opts.FullReferer {
+		return r.Referer()
+	}
+	return trimReferer(r.Referer())
+}
+
+// trimReferer returns the scheme, host and path of a referer, without its user
+// info, query or fragment: a page linking to the site can carry a token in any of
+// them, and an access log is read by more people, and kept longer, than the token
+// was meant to be. A referer that does not parse is "", never the raw header; an
+// opaque one, "data:…" or "mailto:…", keeps only its scheme.
+func trimReferer(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if u.Opaque != "" {
+		return u.Scheme + ":"
+	}
+	trimmed := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}
+	return trimmed.String()
 }
 
 // clientIP returns the address r came from.

@@ -7,6 +7,10 @@
     "type": "object",
     "description": "A collage plugin that writes one log line per request.",
     "properties": {
+      "fullReferer": {
+        "type": "boolean",
+        "description": "FullReferer logs the Referer header exactly as it came. Without it a referer is logged as its scheme, host and path only — no query, fragment or user info, where a reset token or a session id travels — and one that does not parse as a URL is logged empty."
+      },
       "requestIdHeader": {
         "type": "string",
         "description": "RequestIDHeader is the header a request id is read from and sent back in. Default \"X-Request-ID\"."

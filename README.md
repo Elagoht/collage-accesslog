@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.53.0 or later.
+Requires collage v0.55.0 or later.
 
 ## The line
 
@@ -27,6 +27,13 @@ A `5xx` is logged at `ERROR`, everything else at `INFO`. `path` is the path with
 its query: a query carries tokens and e-mail addresses often enough that logging it
 by default is a leak waiting to be found. `bytes` is the body as written, before
 any compression a proxy in front adds.
+
+`referer` is the `Referer` header's scheme, host and path —
+`https://example.org/reset`, not `https://example.org/reset?token=…` — since a
+page linking to the site can carry a token in its query, fragment or user info.
+A referer that does not parse as a URL is logged empty, never raw, and an opaque
+one such as `data:…` as its scheme alone. `fullReferer: true` logs the header
+exactly as it came.
 
 ## Request ids
 
@@ -90,7 +97,8 @@ its duration is how long the connection was open.
     "sample": 0.25,
     "trustProxy": true,
     "trustedProxies": ["10.0.0.0/8"],
-    "requestIdHeader": "X-Request-ID"
+    "requestIdHeader": "X-Request-ID",
+    "fullReferer": false
   }
 }
 ```
@@ -122,6 +130,15 @@ starting.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### v0.1.11
+
+- **Behaviour change: the referer is trimmed.** `referer` is logged as its scheme,
+  host and path, without its query, fragment or user info, where a reset token or
+  a session id can travel; a referer that does not parse is logged as `""` rather
+  than raw. `fullReferer: true` (`Options.FullReferer`) logs the header exactly as
+  before.
+- Requires collage v0.55.0.
 
 ### v0.1.10
 
