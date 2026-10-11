@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.55.0 or later.
+Requires collage v0.58.0 or later.
 
 ## The line
 
@@ -130,6 +130,12 @@ starting.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### v0.1.12
+
+- collage.json is regenerated for editors: `skip`'s description names
+  elagoht/health's paths, as the code does. Nothing else changes.
+- Requires collage v0.58.0.
 
 ### v0.1.11
 
