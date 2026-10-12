@@ -143,6 +143,9 @@ application at start with `unknown key`, where it used to be ignored.
 - The client's address is `collage.ClientIP`. Two differences from before: with
   no trusted proxies listed nothing is trusted, where an empty `trustedProxies`
   trusted loopback and private addresses; and `X-Real-IP` is no longer read.
+- When a trusted proxy forwards an `X-Forwarded-For` hop that is not an
+  address, the line shows the connection's own address; before, it showed the
+  nearest trusted hop past it.
 - A `skip` prefix covers whole segments, with or without a trailing slash:
   `"/healthz"` no longer covers `/healthz-report`, and `"/static/"` covers
   `/static` itself.

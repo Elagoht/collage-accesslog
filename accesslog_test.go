@@ -332,12 +332,14 @@ func TestMisconfigurationStopsStartup(t *testing.T) {
 			t.Errorf("%s: the application started", config)
 		}
 	}
-	_, err := collagetest.TrySite(t,
-		collagetest.WithPlugins(accesslog.New(accesslog.Options{})),
-		collagetest.WithPluginConfig(accesslog.Name, `{"trustProxy": true}`),
-	)
-	if err == nil || !strings.Contains(err.Error(), `unknown key "trustProxy"`) {
-		t.Errorf("trustProxy: err = %v, want an unknown key error", err)
+	for _, key := range []string{"trustProxy", "trustedProxies"} {
+		_, err := collagetest.TrySite(t,
+			collagetest.WithPlugins(accesslog.New(accesslog.Options{})),
+			collagetest.WithPluginConfig(accesslog.Name, `{"`+key+`": null}`),
+		)
+		if err == nil || !strings.Contains(err.Error(), `unknown key "`+key+`"`) {
+			t.Errorf("%s: err = %v, want an unknown key error", key, err)
+		}
 	}
 }
 
