@@ -5,6 +5,6 @@ module github.com/Elagoht/collage-accesslog
 
 go 1.26
 
-require github.com/Elagoht/collage v0.61.2
+require github.com/Elagoht/collage v0.61.4
 
 retract v0.1.6 // tagged by mistake on the previous release's code; use v0.1.7 or later
