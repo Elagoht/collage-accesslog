@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"testing/fstest"
 
 	accesslog "github.com/Elagoht/collage-accesslog"
 	"github.com/Elagoht/collage/pkg/collage"
@@ -64,50 +63,43 @@ func site(t *testing.T, s setup) (http.Handler, *logBuffer) {
 	t.Helper()
 	logs := &logBuffer{}
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
-	cfg := &collage.Config{
-		Server: collage.ServerConfig{Host: "localhost", Port: 3000},
-		Template: collage.TemplateConfig{FS: fstest.MapFS{
-			"t/p.html":  {Data: []byte(`<p>{{.}}</p>`)},
-			"t/ok.html": {Data: []byte(`<p>hello</p>`)},
-		}, Root: "t"},
-	}
+	appLogger := slog.New(slog.DiscardHandler)
 	if s.appLogger {
-		cfg.Logger = logger
+		appLogger = logger
 	} else {
 		s.opts.Logger = logger
-		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
-	cfg.Plugins = []collage.Plugin{accesslog.New(s.opts)}
+	options := []collagetest.SiteOption{
+		collagetest.WithoutHome(),
+		collagetest.WithTemplates(map[string]string{
+			"p.html":  `<p>{{.}}</p>`,
+			"ok.html": `<p>hello</p>`,
+		}),
+		collagetest.WithConfig(func(cfg *collage.Config) { cfg.Logger = appLogger }),
+		collagetest.WithPlugins(accesslog.New(s.opts)),
+		collagetest.WithRegister(
+			collage.NewPage("home").WithContent(collage.NewFragment("home", "ok.html").Build()).WithPath("en", "/").Build(),
+			collage.NewPage("id").WithContent(collage.NewFragment("id", "p.html").WithData(collage.Load(
+				func(_ context.Context, rc *collage.RenderContext) (template.HTML, error) {
+					return template.HTML(accesslog.RequestID(rc.Context())), nil
+				})).Build()).WithPath("en", "/id").Build(),
+			collage.NewPage("broken").WithContent(collage.NewFragment("broken", "ok.html").Required().WithData(collage.Load(
+				func(context.Context, *collage.RenderContext) (string, error) {
+					return "", errors.New("down")
+				})).Build()).WithPath("en", "/broken").Build(),
+			collage.NewPage("health").WithContent(collage.NewFragment("health", "ok.html").Build()).WithPath("en", "/healthz").Build(),
+			collage.NewPage("ready").WithContent(collage.NewFragment("ready", "ok.html").Build()).WithPath("en", "/readyz").Build(),
+		),
+	}
 	if s.config != "" {
-		cfg.PluginConfig = map[string]json.RawMessage{accesslog.Name: json.RawMessage(s.config)}
-	}
-	app, err := collage.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, page := range []*collage.Page{
-		collage.NewPage("home").WithContent(collage.NewFragment("home", "ok.html").Build()).WithPath("en", "/").Build(),
-		collage.NewPage("id").WithContent(collage.NewFragment("id", "p.html").WithData(collage.Load(
-			func(_ context.Context, rc *collage.RenderContext) (template.HTML, error) {
-				return template.HTML(accesslog.RequestID(rc.Context())), nil
-			})).Build()).WithPath("en", "/id").Build(),
-		collage.NewPage("broken").WithContent(collage.NewFragment("broken", "ok.html").Required().WithData(collage.Load(
-			func(context.Context, *collage.RenderContext) (string, error) {
-				return "", errors.New("down")
-			})).Build()).WithPath("en", "/broken").Build(),
-		collage.NewPage("health").WithContent(collage.NewFragment("health", "ok.html").Build()).WithPath("en", "/healthz").Build(),
-		collage.NewPage("ready").WithContent(collage.NewFragment("ready", "ok.html").Build()).WithPath("en", "/readyz").Build(),
-	} {
-		if err := app.RegisterPage(page); err != nil {
-			t.Fatal(err)
-		}
+		options = append(options, collagetest.WithPluginConfig(accesslog.Name, s.config))
 	}
 	if s.handler != nil {
-		if err := app.Handle("/raw/", s.handler); err != nil {
-			t.Fatal(err)
-		}
+		options = append(options, collagetest.WithSetup(func(app *collage.App) error {
+			return app.Handle("/raw/", s.handler)
+		}))
 	}
-	return app.Handler(), logs
+	return collagetest.NewSite(t, options...).App.Handler(), logs
 }
 
 func do(h http.Handler, r *http.Request) *httptest.ResponseRecorder {
