@@ -131,6 +131,11 @@ starting.
 
 ## Changes
 
+### v0.1.13
+
+- Rebuilt against collage v0.60.0; the plugin's code is unchanged.
+- Requires collage v0.60.0.
+
 ### v0.1.12
 
 - collage.json is regenerated for editors: `skip`'s description names

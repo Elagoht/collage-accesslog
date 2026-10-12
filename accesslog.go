@@ -83,7 +83,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.12" }
+func (p *Plugin) Version() string                { return "0.1.13" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var _ collage.Plugin = (*Plugin)(nil)
