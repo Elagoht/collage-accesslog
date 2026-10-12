@@ -16,6 +16,7 @@ import (
 
 	accesslog "github.com/Elagoht/collage-accesslog"
 	"github.com/Elagoht/collage/pkg/collage"
+	"github.com/Elagoht/collage/pkg/collagetest"
 )
 
 // logBuffer is a bytes.Buffer safe for the concurrent writes of a slog handler.
@@ -256,28 +257,60 @@ func TestSample(t *testing.T) {
 	}
 }
 
+// The client's address is collage.ClientIP's: X-Forwarded-For is believed only
+// from Server.TrustedProxies, none by default, and X-Real-IP never.
 func TestProxyAwareAddress(t *testing.T) {
 	cases := []struct {
-		name, remote, xff, want string
-		opts                    accesslog.Options
+		name, remote, xff, realIP, want string
+		trusted                         []string
 	}{
-		{"untrusted headers ignored", "127.0.0.1:1", "198.51.100.7", "127.0.0.1", accesslog.Options{}},
-		{"behind a local proxy", "127.0.0.1:1", "198.51.100.7", "198.51.100.7", accesslog.Options{TrustProxy: true}},
-		{"a client's forged hop", "10.0.0.2:1", "1.1.1.1, 198.51.100.7, 10.0.0.3", "198.51.100.7", accesslog.Options{TrustProxy: true}},
-		{"a public peer is not a proxy", "203.0.113.1:1", "198.51.100.7", "203.0.113.1", accesslog.Options{TrustProxy: true}},
-		{"named proxies", "203.0.113.1:1", "198.51.100.7", "198.51.100.7", accesslog.Options{TrustProxy: true, TrustedProxies: []string{"203.0.113.0/24"}}},
+		{"untrusted headers ignored", "203.0.113.1:1", "198.51.100.7", "", "203.0.113.1", nil},
+		{"loopback is not trusted by default", "127.0.0.1:1", "198.51.100.7", "", "127.0.0.1", nil},
+		{"behind a named proxy", "203.0.113.1:1", "198.51.100.7", "", "198.51.100.7", []string{"203.0.113.0/24"}},
+		{"a client's forged hop", "10.0.0.2:1", "1.1.1.1, 198.51.100.7, 10.0.0.3", "", "198.51.100.7", []string{"10.0.0.0/8"}},
+		{"a public peer is not a proxy", "203.0.113.1:1", "198.51.100.7", "", "203.0.113.1", []string{"10.0.0.0/8"}},
+		{"X-Real-IP is not read", "127.0.0.1:1", "", "198.51.100.7", "127.0.0.1", []string{"127.0.0.1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, logs := site(t, setup{opts: tc.opts})
+			site := collagetest.NewSite(t,
+				collagetest.WithPlugins(accesslog.New(accesslog.Options{})),
+				collagetest.WithConfig(func(c *collage.Config) { c.Server.TrustedProxies = tc.trusted }),
+			)
 			r := httptest.NewRequest(http.MethodGet, "/", nil)
 			r.RemoteAddr = tc.remote
-			r.Header.Set("X-Forwarded-For", tc.xff)
-			do(h, r)
-			if l := logs.lines(t); len(l) != 1 || l[0]["ip"] != tc.want {
-				t.Errorf("lines = %v, want ip %s", l, tc.want)
+			if tc.xff != "" {
+				r.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			if tc.realIP != "" {
+				r.Header.Set("X-Real-IP", tc.realIP)
+			}
+			do(site.App.Handler(), r)
+			if !site.Logs.Has(slog.LevelInfo, "msg=request", "ip="+tc.want+" ") {
+				t.Errorf("want ip %s in\n%s", tc.want, site.Logs)
 			}
 		})
+	}
+}
+
+// The request id's header is configured under "requestIDHeader".
+func TestRequestIDHeaderFromConfiguration(t *testing.T) {
+	h, _ := site(t, setup{config: `{"requestIDHeader": "X-Trace-ID"}`})
+	if w := get(h, "/id", "X-Trace-ID", "abc-123"); w.Header().Get("X-Trace-ID") != "abc-123" {
+		t.Errorf("X-Trace-ID = %q, want the id sent", w.Header().Get("X-Trace-ID"))
+	}
+}
+
+// A skip prefix covers whole segments, with or without a trailing slash.
+func TestSkipPrefixSegments(t *testing.T) {
+	for _, prefix := range []string{"/healthz", "/healthz/"} {
+		h, logs := site(t, setup{config: `{"skip": ["` + prefix + `"]}`})
+		get(h, "/healthz")
+		get(h, "/healthz-report")
+		l := logs.lines(t)
+		if len(l) != 1 || l[0]["path"] != "/healthz-report" {
+			t.Errorf("skip %q: lines = %v, want only /healthz-report", prefix, l)
+		}
 	}
 }
 
@@ -286,13 +319,25 @@ func TestMisconfigurationStopsStartup(t *testing.T) {
 		`{"sample": 1.5}`,
 		`{"sample": -0.1}`,
 		`{"skip": ["healthz"]}`,
-		`{"trustedProxies": ["not-an-address"]}`,
-		`{"requestIdHeader": "X Request"}`,
+		`{"requestIDHeader": "X Request"}`,
+		// Removed in v0.2.0: Server.TrustedProxies is the application's.
+		`{"trustProxy": true}`,
+		`{"trustedProxies": ["10.0.0.0/8"]}`,
 	} {
-		h, _ := site(t, setup{config: config})
-		if code := get(h, "/").Code; code != http.StatusServiceUnavailable {
-			t.Errorf("%s: status %d, want 503", config, code)
+		_, err := collagetest.TrySite(t,
+			collagetest.WithPlugins(accesslog.New(accesslog.Options{})),
+			collagetest.WithPluginConfig(accesslog.Name, config),
+		)
+		if err == nil {
+			t.Errorf("%s: the application started", config)
 		}
+	}
+	_, err := collagetest.TrySite(t,
+		collagetest.WithPlugins(accesslog.New(accesslog.Options{})),
+		collagetest.WithPluginConfig(accesslog.Name, `{"trustProxy": true}`),
+	)
+	if err == nil || !strings.Contains(err.Error(), `unknown key "trustProxy"`) {
+		t.Errorf("trustProxy: err = %v, want an unknown key error", err)
 	}
 }
 

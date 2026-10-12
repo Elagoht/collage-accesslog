@@ -27,7 +27,6 @@ import (
 	mrand "math/rand/v2"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
@@ -46,24 +45,19 @@ type Options struct {
 	Logger *slog.Logger `json:"-"`
 	// Skip are path prefixes never logged. Default ["/_collage/", "/healthz", "/readyz"]:
 	// collage's development endpoints, and the liveness and readiness checks a
-	// load balancer or kubelet polls every few seconds (elagoht/health's paths). An empty list in configuration logs everything.
+	// load balancer or kubelet polls every few seconds (elagoht/health's paths).
+	// An empty list in configuration logs everything. A prefix covers whole
+	// segments, with or without a trailing slash: "/healthz" and "/healthz/"
+	// both cover /healthz and /healthz/db, and neither covers /healthz-report.
 	Skip []string `json:"skip"`
 	// Sample is the fraction of successful (2xx) responses logged, between 0 and
 	// 1: 0.1 logs one in ten. Zero, the default, logs every one. A redirect, a
 	// client error and a server error are always logged: they are the lines
 	// someone goes looking for.
 	Sample float64 `json:"sample"`
-	// TrustProxy reads the client's address from X-Forwarded-For, or
-	// X-Real-IP, when the request came from a trusted proxy. Without it those
-	// headers are ignored, since anybody can send them.
-	TrustProxy bool `json:"trustProxy"`
-	// TrustedProxies are the addresses and CIDR ranges of the proxies in front
-	// of the site. Empty trusts loopback and private addresses, which is what a
-	// reverse proxy on the same host or network has.
-	TrustedProxies []string `json:"trustedProxies"`
 	// RequestIDHeader is the header a request id is read from and sent back in.
 	// Default "X-Request-ID".
-	RequestIDHeader string `json:"requestIdHeader"`
+	RequestIDHeader string `json:"requestIDHeader"`
 	// FullReferer logs the Referer header exactly as it came. Without it a
 	// referer is logged as its scheme, host and path only — no query, fragment
 	// or user info, where a reset token or a session id travels — and one that
@@ -73,9 +67,8 @@ type Options struct {
 
 // Plugin writes the lines.
 type Plugin struct {
-	opts    Options
-	log     *slog.Logger
-	trusted []netip.Prefix
+	opts Options
+	log  *slog.Logger
 }
 
 // New returns a plugin with opts as its starting point, which the application's
@@ -83,7 +76,7 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.1.13" }
+func (p *Plugin) Version() string                { return "0.2.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
 var _ collage.Plugin = (*Plugin)(nil)
@@ -117,17 +110,6 @@ func (p *Plugin) Init(_ context.Context, host collage.Host) error {
 	}
 	if !headerName.MatchString(o.RequestIDHeader) {
 		return fmt.Errorf("accesslog: %q is not a header name", o.RequestIDHeader)
-	}
-	for _, s := range o.TrustedProxies {
-		prefix, err := netip.ParsePrefix(s)
-		if err != nil {
-			addr, addrErr := netip.ParseAddr(s)
-			if addrErr != nil {
-				return fmt.Errorf("accesslog: trusted proxy %q is neither an address nor a CIDR range", s)
-			}
-			prefix = netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen())
-		}
-		p.trusted = append(p.trusted, prefix.Masked())
 	}
 	p.log = o.Logger
 	if p.log == nil {
@@ -178,7 +160,7 @@ func (p *Plugin) middleware(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), idKey{}, id))
 
 		for _, prefix := range p.opts.Skip {
-			if strings.HasPrefix(r.URL.Path, prefix) {
+			if under(r.URL.Path, prefix) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -218,7 +200,7 @@ func (p *Plugin) write(r *http.Request, rec *recorder, id string, d time.Duratio
 		slog.Int("status", status),
 		slog.Int64("bytes", rec.bytes),
 		slog.Duration("duration", d),
-		slog.String("ip", p.clientIP(r)),
+		slog.String("ip", clientIP(r)),
 		slog.String("user_agent", r.UserAgent()),
 		slog.String("referer", p.referer(r)),
 		slog.String("request_id", id),
@@ -254,58 +236,27 @@ func trimReferer(raw string) string {
 	return trimmed.String()
 }
 
-// clientIP returns the address r came from.
-//
-// Behind trusted proxies it walks X-Forwarded-For from the right, past every
-// proxy the site trusts, and takes the first address that is not one: each proxy
-// appends the address it was reached from, so everything to the right of that
-// point was written by a proxy the site runs, and everything to the left by the
-// client, who can write anything there.
-func (p *Plugin) clientIP(r *http.Request) string {
+// clientIP returns the address r came from: collage.ClientIP, which believes
+// X-Forwarded-For only from the application's Server.TrustedProxies. When it
+// cannot name one — a trusted proxy forwarded a hop that is not an address — the
+// connection's own address is logged.
+func clientIP(r *http.Request) string {
+	if addr := collage.ClientIP(r); addr.IsValid() {
+		return addr.String()
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		host = r.RemoteAddr
+		return r.RemoteAddr
 	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
-		return host
-	}
-	addr = addr.Unmap()
-	if !p.opts.TrustProxy || !p.isTrusted(addr) {
-		return addr.String()
-	}
-	if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
-		hops := strings.Split(strings.Join(values, ","), ",")
-		for i := len(hops) - 1; i >= 0; i-- {
-			hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
-			if err != nil {
-				// A trusted proxy writes an address; this was written by the
-				// client, so the nearest trusted hop is as far as can be told.
-				break
-			}
-			addr = hop.Unmap()
-			if !p.isTrusted(addr) {
-				break
-			}
-		}
-		return addr.String()
-	}
-	if realIP, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get("X-Real-IP"))); err == nil {
-		return realIP.Unmap().String()
-	}
-	return addr.String()
+	return host
 }
 
-func (p *Plugin) isTrusted(addr netip.Addr) bool {
-	if p.trusted == nil {
-		return addr.IsLoopback() || addr.IsPrivate()
-	}
-	for _, prefix := range p.trusted {
-		if prefix.Contains(addr) {
-			return true
-		}
-	}
-	return false
+// under reports whether urlPath is prefix or below it, by whole segments, a
+// trailing slash on prefix or not: "/healthz" and "/healthz/" cover "/healthz"
+// and "/healthz/db", not "/healthz-report".
+func under(urlPath, prefix string) bool {
+	prefix = strings.TrimSuffix(prefix, "/")
+	return prefix == "" || urlPath == prefix || strings.HasPrefix(urlPath, prefix+"/")
 }
 
 // recorder counts what is written through it. Flush and Hijack pass through, and

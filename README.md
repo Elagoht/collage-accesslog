@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.58.0 or later.
+Requires collage v0.61.0 or later.
 
 ## The line
 
@@ -62,8 +62,10 @@ would show every reader the first reader's id.
 `Skip` lists path prefixes that are never logged, `/_collage/` — collage's
 development endpoints — and `/healthz` and `/readyz`, the probe paths of
 `elagoht/health`, by default. A different `livePath` or `readyPath` there must be
-added to `skip`. A skipped request still gets an
-id. An empty list logs everything.
+added to `skip`. A prefix covers whole segments, with or without a trailing
+slash: `/healthz` and `/healthz/` both cover `/healthz` and `/healthz/db`, not
+`/healthz-report`. A skipped request still gets an id. An empty list logs
+everything.
 
 A busy site can log a fraction of its successful responses: `Sample: 0.1` logs one
 `2xx` in ten, chosen at random. A redirect, a `4xx` and a `5xx` are always logged —
@@ -71,15 +73,14 @@ they are the lines someone goes looking for.
 
 ## The client's address
 
-`ip` is the address the connection came from. Behind a reverse proxy that is the
-proxy, so `TrustProxy` reads `X-Forwarded-For` — or `X-Real-IP` — instead, when the
-connection came from a trusted proxy. `X-Forwarded-For` is walked from the right,
-past every trusted proxy, and the first address that is not one is the client's:
-everything to its left was written by the client, who can write anything there.
-
-`TrustedProxies` names the proxies, as addresses or CIDR ranges. Empty trusts
-loopback and private addresses, which is what a proxy on the same host or network
-has; a CDN's ranges have to be named.
+`ip` is `collage.ClientIP`: the address the connection came from or, when that is
+one of the application's `Server.TrustedProxies`, the client's address from
+`X-Forwarded-For`, walked from the right past every trusted proxy. Everything to
+the left of the first untrusted address was written by the client, who can write
+anything there. With no trusted proxies listed — the default — `X-Forwarded-For`
+is ignored; `X-Real-IP` is never read. Behind a reverse proxy, list it in
+`Config.Server.TrustedProxies` (addresses or CIDR ranges), and every plugin that
+asks collage for the client's address agrees with the log.
 
 ## Streams and WebSockets
 
@@ -95,17 +96,14 @@ its duration is how long the connection was open.
   "elagoht/accesslog": {
     "skip": ["/_collage/", "/healthz", "/readyz", "/static/"],
     "sample": 0.25,
-    "trustProxy": true,
-    "trustedProxies": ["10.0.0.0/8"],
-    "requestIdHeader": "X-Request-ID",
+    "requestIDHeader": "X-Request-ID",
     "fullReferer": false
   }
 }
 ```
 
 `Logger` can only be set from Go. A sample outside 0 to 1, a skip prefix not
-beginning with `/`, a trusted proxy that is neither an address nor a range, and a
-header name with anything but letters, digits and dashes stop the application from
+beginning with `/`, and a header name with anything but letters, digits and dashes stop the application from
 starting.
 
 ## Limitations
@@ -130,6 +128,25 @@ starting.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### v0.2.0
+
+Changed in v0.2.0, for the v1 plugin conventions. A removed key now stops the
+application at start with `unknown key`, where it used to be ignored.
+
+| was | now |
+|---|---|
+| `"trustProxy"` / `Options.TrustProxy` | removed: list the proxies in `Config.Server.TrustedProxies` |
+| `"trustedProxies"` / `Options.TrustedProxies` | `Config.Server.TrustedProxies` |
+| `"requestIdHeader"` | `"requestIDHeader"` (the old spelling still decodes: keys match case-insensitively) |
+
+- The client's address is `collage.ClientIP`. Two differences from before: with
+  no trusted proxies listed nothing is trusted, where an empty `trustedProxies`
+  trusted loopback and private addresses; and `X-Real-IP` is no longer read.
+- A `skip` prefix covers whole segments, with or without a trailing slash:
+  `"/healthz"` no longer covers `/healthz-report`, and `"/static/"` covers
+  `/static` itself.
+- Requires collage v0.61.0.
 
 ### v0.1.13
 
