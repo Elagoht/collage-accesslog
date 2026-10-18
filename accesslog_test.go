@@ -96,7 +96,7 @@ func site(t *testing.T, s setup) (http.Handler, *logBuffer) {
 	}
 	if s.handler != nil {
 		options = append(options, collagetest.WithSetup(func(app *collage.App) error {
-			return app.Handle("/raw/", s.handler)
+			return app.Handle("/raw/", s.handler, collage.WithMiddleware())
 		}))
 	}
 	return collagetest.NewSite(t, options...).App.Handler(), logs
