@@ -3,6 +3,7 @@
   "name": "elagoht/accesslog",
   "description": "A collage plugin that writes one log line per request.",
   "repository": "https://github.com/Elagoht/collage-accesslog",
+  "setup": "Works on its own: one log line per request, and an `X-Request-ID` on every response.\nTo log the same id from a handler: `accesslog.RequestID(ctx)`.",
   "config": {
     "type": "object",
     "description": "A collage plugin that writes one log line per request.",
