@@ -10,7 +10,7 @@ app, err := collage.New(&collage.Config{
 })
 ```
 
-Requires collage v0.61.0 or later.
+Requires collage v0.67.0 or later.
 
 ## The line
 
