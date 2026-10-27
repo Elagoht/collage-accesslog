@@ -23,7 +23,9 @@ own logger by default — whatever `Config.Logger` is — or `Options.Logger`. A
 `slog.NewJSONHandler` writes the same line as JSON, where `duration` is in
 nanoseconds.
 
-A `5xx` is logged at `ERROR`, everything else at `INFO`. `path` is the path without
+Every request gets its line, whoever answers it — the page, an `app.Handle` mount,
+another plugin, collage itself before routing (see
+[What it sees](#what-it-sees)). A `5xx` is logged at `ERROR`, everything else at `INFO`. `path` is the path without
 its query: a query carries tokens and e-mail addresses often enough that logging it
 by default is a leak waiting to be found. `bytes` is the body as written, before
 any compression a proxy in front adds.
@@ -52,10 +54,40 @@ func checkout(ctx context.Context, rc *collage.RenderContext) (Order, []string, 
 ```
 
 `accesslog.RequestID(rc.Context())` works in a data handler, an action, and any
-handler of the application's own; outside a request it is `""`. The request's own
-header is set to the id too, so a handler proxying the request onward passes on the
-id that was logged. A page that renders the id must not be cached: a cached page
+handler of the application's own, a bare `app.Handle` one included; outside a
+request it is `""`. The request's own header is set to the id too, so a handler
+proxying the request onward passes on the id that was logged — by the plugin's
+middleware, so not for a request it does not reach (see
+[What it sees](#what-it-sees)). A page that renders the id must not be cached: a cached page
 would show every reader the first reader's id.
+
+## What it sees
+
+The plugin is two things: a `collage.RequestHook`, which sees every request before
+any plugin's middleware and before routing, and a middleware, which wraps the
+response writer. The middleware writes the line, with the bytes, and sends the id
+back in `X-Request-ID`. A request the middleware never reaches is logged by the
+hook once the response is written, with what the hook can know: the status, the
+duration, the request's own fields and its id — **no `bytes`, and no
+`X-Request-ID` on the response**. Those are:
+
+- a request a plugin listed **before** accesslog answers itself: a ban
+  `elagoht/fail2ban` refuses with `403`, a request `elagoht/health` sheds with `503
+  overloaded`;
+- a request an `app.Handle` mount serves, which runs no middleware unless it was
+  mounted with `collage.WithMiddleware()` (collage v0.67.0);
+- a request collage answers before routing: a dirty path's redirect to its clean
+  spelling (`301`/`308`), logged under the path as it was asked, and a path with an
+  encoded slash (`404`).
+
+For the full line — `bytes`, and the id sent back — list accesslog **first** in
+`Config.Plugins`, before `elagoht/health` and `elagoht/fail2ban`, and mount a
+handler with `app.Handle(prefix, h, collage.WithMiddleware())`. fail2ban's README
+asks to be listed first so its ban check runs before the other plugins'
+middleware; accesslog is the exception, because its middleware only observes.
+Listed first, it also logs every request of a banned client, each a `403`, which
+sampling never drops: a scanner hammering the site after its ban is a line per
+request, and those are the lines worth having in an attack.
 
 ## Skipping and sampling
 
@@ -65,7 +97,8 @@ development endpoints — and `/healthz` and `/readyz`, the probe paths of
 added to `skip`. A prefix covers whole segments, with or without a trailing
 slash: `/healthz` and `/healthz/` both cover `/healthz` and `/healthz/db`, not
 `/healthz-report`. A skipped request still gets an id. An empty list logs
-everything.
+everything. For a request answered before routing, the prefix is matched against
+the cleaned path, so `/_collage/../admin` is not skipped.
 
 A busy site can log a fraction of its successful responses: `Sample: 0.1` logs one
 `2xx` in ten, chosen at random. A redirect, a `4xx` and a `5xx` are always logged —
@@ -108,26 +141,31 @@ starting.
 
 ## Limitations
 
-- Where the plugin's middleware runs depends on collage's version. From collage
-  v0.38.0 it runs where the plugin was registered: in `Config.Plugins` it is outside
-  every `app.Use` middleware, so a request the application's middleware answers
-  itself — a `401` from an auth check — is logged, and the time that middleware
-  spent is in `duration`. Before v0.38.0 it ran inside the application's
-  middleware, and such a request was neither logged nor timed.
-- With `elagoht/health`, the order decides what is logged. Middleware is registered
-  where it is listed, so with accesslog listed after health, a probe and a request
-  health sheds with `503 overloaded` never reach it and are not logged. List
-  accesslog before health to log shed requests; the probes then reach it too,
-  which the default `skip` of `/healthz` and `/readyz` keeps out of the log.
-- collage's development reload stream is served ahead of all middleware and is
-  never logged, whatever `Skip` says.
-- collage redirects a path with dot segments or doubled slashes to its clean
-  spelling ahead of all middleware, so that redirect is not logged; the request
-  for the clean path that follows is.
+- collage's development reload stream, and the development server's refusal of an
+  unknown `Host`, are answered ahead of everything of the application's, the hook
+  included, and are never logged, whatever `Skip` says.
+- A request the middleware does not reach has no `bytes` in its line and no
+  `X-Request-ID` on its response (see [What it sees](#what-it-sees)).
+- A request whose handler panics is logged only when the middleware reached it:
+  collage does not hand the hook a status for a request whose serving panicked.
 - Sampling to none is not offered: `Sample` is zero by default and zero means all.
   A site that wants no successful requests logged wants `Skip`, or no access log.
 
 ## Changes
+
+### Changed in v0.3.0
+
+- **Behaviour change: every request is logged, wherever it was answered.** The
+  plugin is a `collage.RequestHook` too (a new `OnRequest` method), and logs the
+  requests its middleware never reached: a ban `elagoht/fail2ban` refuses when it
+  is listed first, as its README asks, a request `elagoht/health` sheds, a bare
+  `app.Handle` mount's response, and collage's redirect of a dirty path. Those
+  lines have no `bytes` attribute. Expect more lines, a banned client's `403`s
+  among them.
+- `accesslog.RequestID` works in a bare `app.Handle` handler; its response still
+  carries no `X-Request-ID` unless it was mounted with `collage.WithMiddleware()`.
+- The README says which requests the middleware sees and in which order to list
+  the plugin for the full line.
 
 ### v0.2.0
 

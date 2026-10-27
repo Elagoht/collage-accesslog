@@ -10,6 +10,11 @@
 // the logger's handler's choice, not the plugin's. The logger is the application's
 // own unless Options.Logger names another.
 //
+// The plugin is a RequestHook as well as a middleware, so a request the
+// middleware never reaches — refused by a plugin listed before it, served by a
+// bare app.Handle, redirected by collage before routing — is logged too, without
+// its bytes.
+//
 // Every request gets an id — the one its X-Request-ID header carried when that is
 // a sensible value, a new one otherwise — sent back on the response and put in the
 // request's context, so a handler can log with it:
@@ -28,8 +33,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Elagoht/collage/pkg/collage"
@@ -76,10 +83,13 @@ type Plugin struct {
 func New(opts Options) *Plugin { return &Plugin{opts: opts} }
 
 func (p *Plugin) Name() string                   { return Name }
-func (p *Plugin) Version() string                { return "0.2.2" }
+func (p *Plugin) Version() string                { return "0.3.0" }
 func (p *Plugin) Shutdown(context.Context) error { return nil }
 
-var _ collage.Plugin = (*Plugin)(nil)
+var (
+	_ collage.Plugin      = (*Plugin)(nil)
+	_ collage.RequestHook = (*Plugin)(nil)
+)
 
 var headerName = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
@@ -140,6 +150,57 @@ func newID() string {
 	return hex.EncodeToString(raw[:])
 }
 
+// pending is a request OnRequest saw, until its response is written: its id,
+// when it started, and whether the middleware reached it.
+type pending struct {
+	id    string
+	start time.Time
+	seen  atomic.Bool
+}
+
+type pendingKey struct{}
+
+// requestID is the id r's header carries when it looks like one, a new one
+// otherwise.
+func (p *Plugin) requestID(r *http.Request) string {
+	if id := r.Header.Get(p.opts.RequestIDHeader); validID.MatchString(id) {
+		return id
+	}
+	return newID()
+}
+
+// OnRequest sees every request, before any plugin's middleware and before
+// routing, and logs the ones the middleware never reaches: a request a plugin
+// listed before this one answers itself — elagoht/fail2ban's ban, elagoht/health's
+// shed — one an app.Handle mount serves without middleware, and one collage
+// answers before routing, a dirty path's redirect. Such a line has no bytes,
+// which only the middleware can count, and the response carries no request id
+// header, which only the middleware can set; the id is in the request's context
+// all the same, so RequestID works in a bare handler.
+func (p *Plugin) OnRequest(r *http.Request) (context.Context, func(status int)) {
+	if collage.IsCapture(r.Context()) {
+		return r.Context(), nil
+	}
+	req := &pending{id: p.requestID(r), start: time.Now()}
+	ctx := context.WithValue(r.Context(), idKey{}, req.id)
+	ctx = context.WithValue(ctx, pendingKey{}, req)
+	return ctx, func(status int) {
+		if req.seen.Load() {
+			return
+		}
+		// Skip is matched against the cleaned path: a dirty path is answered
+		// with a redirect here, and "/_collage/../admin" must not pass as a
+		// skipped one.
+		clean := path.Clean("/" + r.URL.Path)
+		for _, prefix := range p.opts.Skip {
+			if under(clean, prefix) {
+				return
+			}
+		}
+		p.write(r, status, -1, req.id, time.Since(req.start))
+	}
+}
+
 func (p *Plugin) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A static build asking for its own files to capture their headers is
@@ -149,9 +210,15 @@ func (p *Plugin) middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		id := r.Header.Get(p.opts.RequestIDHeader)
-		if !validID.MatchString(id) {
-			id = newID()
+		var id string
+		if req, ok := r.Context().Value(pendingKey{}).(*pending); ok {
+			// OnRequest chose the id; the line is this middleware's to write.
+			req.seen.Store(true)
+			id = req.id
+		} else {
+			id = p.requestID(r)
+		}
+		if r.Header.Get(p.opts.RequestIDHeader) != id {
 			// A handler forwarding the request onward passes on the id it was
 			// given, not the one the client sent that was refused.
 			r.Header.Set(p.opts.RequestIDHeader, id)
@@ -172,18 +239,18 @@ func (p *Plugin) middleware(next http.Handler) http.Handler {
 			// A panic on its way to collage's own recovery becomes a 500 there;
 			// the line says so rather than going missing with it.
 			if v := recover(); v != nil {
-				rec.status = http.StatusInternalServerError
-				p.write(r, rec, id, time.Since(start))
+				p.write(r, http.StatusInternalServerError, rec.bytes, id, time.Since(start))
 				panic(v)
 			}
 		}()
 		next.ServeHTTP(rec, r)
-		p.write(r, rec, id, time.Since(start))
+		p.write(r, rec.status, rec.bytes, id, time.Since(start))
 	})
 }
 
-func (p *Plugin) write(r *http.Request, rec *recorder, id string, d time.Duration) {
-	status := rec.status
+// write logs one line. bytes is -1 when the body was not counted: the line then
+// has no bytes attribute rather than a wrong one.
+func (p *Plugin) write(r *http.Request, status int, bytes int64, id string, d time.Duration) {
 	if status == 0 {
 		status = http.StatusOK
 	}
@@ -194,17 +261,23 @@ func (p *Plugin) write(r *http.Request, rec *recorder, id string, d time.Duratio
 	if status >= 500 {
 		level = slog.LevelError
 	}
-	p.log.LogAttrs(r.Context(), level, "request",
+	attrs := make([]slog.Attr, 0, 9)
+	attrs = append(attrs,
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 		slog.Int("status", status),
-		slog.Int64("bytes", rec.bytes),
+	)
+	if bytes >= 0 {
+		attrs = append(attrs, slog.Int64("bytes", bytes))
+	}
+	attrs = append(attrs,
 		slog.Duration("duration", d),
 		slog.String("ip", clientIP(r)),
 		slog.String("user_agent", r.UserAgent()),
 		slog.String("referer", p.referer(r)),
 		slog.String("request_id", id),
 	)
+	p.log.LogAttrs(r.Context(), level, "request", attrs...)
 }
 
 // referer returns r's Referer header as it is logged: whole with FullReferer,
